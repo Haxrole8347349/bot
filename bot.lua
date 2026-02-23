@@ -1,21 +1,40 @@
--- PHANTOM BEHAVIOR ENGINE v2.5 - Makes each bot move like a human
+-- PHANTOM BEHAVIOR ENGINE v2.6 - Subtle human behaviors
 -- INJECT THIS FIRST, BEFORE YOUR VIC SCRIPT
--- It won't interfere - just runs in background adding human behaviors
+-- Won't pull bots from spawn, just adds micro-movements
+
+-- Auto-clear previous instances (no more re-injection issues)
+_G.PhantomEngineActive = nil
+_G._PhantomProfile = nil
+
+warn("=== PHANTOM ENGINE v2.6 STARTING ===")
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
-local player = Players.LocalPlayer
-local char = player.Character or player.CharacterAdded:Wait()
-local humanoid = char:WaitForChild("Humanoid")
-local rootPart = char:WaitForChild("HumanoidRootPart")
+warn("[1/6] Services loaded")
 
--- Singleton check
-if _G.PhantomEngineActive then
-    warn("Phantom Engine already running!")
+local player = Players.LocalPlayer
+warn("[2/6] Player: " .. player.Name)
+
+local char = player.Character
+if not char then
+    warn("[3/6] Waiting for character...")
+    char = player.CharacterAdded:Wait()
+else
+    warn("[3/6] Character already loaded")
+end
+
+local humanoid = char:WaitForChild("Humanoid", 10)
+local rootPart = char:WaitForChild("HumanoidRootPart", 10)
+
+if not humanoid or not rootPart then
+    warn("[ERROR] Failed to find Humanoid or RootPart!")
     return
 end
+
+warn("[4/6] Character components found")
+
 _G.PhantomEngineActive = true
 
 -- Generate unique personality based on username
@@ -29,30 +48,28 @@ local function generateProfile()
     math.randomseed(seed)
     
     local profile = {
-        baseWalkSpeed = math.random(14, 18),
-        sprintChance = math.random(25, 75),
-        lateralDrift = math.random(3, 12) / 100,
-        reactionTimeMin = math.random(150, 350) / 1000,
-        reactionTimeMax = math.random(400, 900) / 1000,
-        pauseChance = math.random(2, 8),
-        movementErrorRate = math.random(3, 12),
-        jumpWhileMovingChance = math.random(5, 20),
-        lookAroundFrequency = math.random(8, 25),
-        cameraShakeIntensity = math.random(2, 8) / 100,
+        baseWalkSpeed = math.random(14, 17),
+        lateralDrift = math.random(1, 4) / 100,  -- Reduced drift
+        reactionTimeMin = math.random(200, 400) / 1000,
+        reactionTimeMax = math.random(500, 1000) / 1000,
+        cameraShakeIntensity = math.random(1, 3) / 100,  -- Reduced shake
+        lookAroundFrequency = math.random(20, 45),  -- Less frequent
+        fidgetDistance = math.random(5, 15) / 10,  -- 0.5-1.5 studs only!
+        fidgetChance = 15,  -- Lower chance
     }
     
     _G._PhantomProfile = profile
     math.randomseed(tick())
     
-    print(string.format("🎭 Phantom Profile: Speed=%.1f, Drift=%.1f%%, Reaction=%.2f-%.2fs", 
-        profile.baseWalkSpeed, profile.lateralDrift * 100, profile.reactionTimeMin, profile.reactionTimeMax))
+    warn(string.format("[5/6] Profile: Speed=%.1f, Drift=%.1f%%, Fidget=%.1f studs", 
+        profile.baseWalkSpeed, profile.lateralDrift * 100, profile.fidgetDistance))
     
     return profile
 end
 
 local profile = generateProfile()
 
--- Automatic camera drift (runs every frame)
+-- Subtle camera drift (runs every frame)
 local lastCameraShift = tick()
 RunService.RenderStepped:Connect(function()
     if not _G.PhantomEngineActive then return end
@@ -61,54 +78,54 @@ RunService.RenderStepped:Connect(function()
     if not camera or camera.CameraType ~= Enum.CameraType.Custom then return end
     
     local now = tick()
-    if now - lastCameraShift < 0.5 or math.random(1, 100) > 30 then return end
+    if now - lastCameraShift < 1 or math.random(1, 100) > 20 then return end  -- Less frequent
     
     lastCameraShift = now
     local shakeX = (math.random() - 0.5) * profile.cameraShakeIntensity
     local shakeY = (math.random() - 0.5) * profile.cameraShakeIntensity
-    camera.CFrame = camera.CFrame * CFrame.Angles(math.rad(shakeY * 10), math.rad(shakeX * 10), 0)
+    camera.CFrame = camera.CFrame * CFrame.Angles(math.rad(shakeY * 5), math.rad(shakeX * 5), 0)
 end)
 
--- Random looking around
+-- Minimal looking around (subtle head turns)
 task.spawn(function()
     while _G.PhantomEngineActive do
-        task.wait(profile.lookAroundFrequency + math.random(-5, 5))
-        if math.random(1, 100) <= 60 then
+        task.wait(profile.lookAroundFrequency + math.random(-10, 10))
+        if math.random(1, 100) <= 40 then  -- Lower chance
             local camera = workspace.CurrentCamera
             if camera and camera.CameraType == Enum.CameraType.Custom then
                 local lookDirection = math.random(0, 360)
-                local lookIntensity = math.random(15, 60)
+                local lookIntensity = math.random(10, 30)  -- Reduced intensity
                 local targetRotation = CFrame.Angles(
-                    math.rad(math.random(-15, 15)),
+                    math.rad(math.random(-8, 8)),  -- Less vertical movement
                     math.rad(math.cos(math.rad(lookDirection)) * lookIntensity),
                     0
                 )
-                local steps = math.random(8, 15)
+                local steps = math.random(12, 20)  -- Smoother
                 for i = 1, steps do
                     if camera and _G.PhantomEngineActive then
                         camera.CFrame = camera.CFrame:Lerp(camera.CFrame * targetRotation, 1 / steps)
                     end
-                    task.wait(0.03)
+                    task.wait(0.04)
                 end
             end
         end
     end
 end)
 
--- Idle fidgeting
+-- MINIMAL idle fidgeting (stays near spawn!)
 task.spawn(function()
     while _G.PhantomEngineActive do
-        task.wait(math.random(30, 90))
-        if math.random(1, 100) <= 25 and rootPart then
-            local fidgetDistance = math.random(2, 5)
+        task.wait(math.random(45, 120))  -- Way less frequent (45-120 sec)
+        if math.random(1, 100) <= profile.fidgetChance and rootPart then
             local fidgetAngle = math.random(0, 360)
             local fidgetTarget = rootPart.Position + Vector3.new(
-                math.cos(math.rad(fidgetAngle)) * fidgetDistance,
+                math.cos(math.rad(fidgetAngle)) * profile.fidgetDistance,  -- 0.5-1.5 studs max
                 0,
-                math.sin(math.rad(fidgetAngle)) * fidgetDistance
+                math.sin(math.rad(fidgetAngle)) * profile.fidgetDistance
             )
             humanoid:MoveTo(fidgetTarget)
-            task.wait(math.random(1, 3))
+            task.wait(math.random(0.5, 1.5))  -- Quick fidget
+            humanoid:MoveTo(rootPart.Position)  -- Return to center
         end
     end
 end)
@@ -116,15 +133,20 @@ end)
 -- Character respawn handler
 player.CharacterAdded:Connect(function(newChar)
     char = newChar
-    humanoid = newChar:WaitForChild("Humanoid")
-    rootPart = newChar:WaitForChild("HumanoidRootPart")
-    task.wait(1)
-    humanoid.WalkSpeed = profile.baseWalkSpeed
-    print("🔄 Phantom behaviors reattached")
+    humanoid = newChar:WaitForChild("Humanoid", 10)
+    rootPart = newChar:WaitForChild("HumanoidRootPart", 10)
+    
+    if humanoid and rootPart then
+        task.wait(1)
+        humanoid.WalkSpeed = profile.baseWalkSpeed
+        warn("[RESPAWN] Phantom behaviors reattached")
+    end
 end)
 
 -- Set initial walk speed
 humanoid.WalkSpeed = profile.baseWalkSpeed
 
-print("✅ PHANTOM ENGINE ACTIVE - Human behaviors running in background")
-print("✅ Your Vic script will work normally - this won't interfere!")
+warn("[6/6] PHANTOM ENGINE ACTIVE ✓")
+warn(">>> Subtle human behaviors running (minimal movement)")
+warn(">>> Your Vic script will work normally!")
+warn("===========================================")
