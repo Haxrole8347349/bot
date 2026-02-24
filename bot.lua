@@ -1,7 +1,6 @@
 -- ═══════════════════════════════════════════════════════════
--- ADVANCED BOT PROTECTION v7.0 - NUCLEAR OPTION
--- Hooks into game anti-cheat, blocks telemetry, hides executor
--- No mercy, no detection, no flags
+-- ADVANCED BOT PROTECTION v7.1 - FIXED EXECUTION
+-- Now with robust error handling and executor compatibility
 -- ═══════════════════════════════════════════════════════════
 
 local gameJobId = game.JobId
@@ -31,57 +30,100 @@ local nukeGlobals = {
 
 for _, name in ipairs(nukeGlobals) do
     pcall(function()
-        if getgenv()[name] then getgenv()[name] = nil end
+        if getgenv and getgenv()[name] then getgenv()[name] = nil end
         if _G[name] then _G[name] = nil end
     end)
 end
 
--- Hide common executor detection methods
-if getgenv().isexecutorclosure then
-    local old = getgenv().isexecutorclosure
-    getgenv().isexecutorclosure = function() return false end
-end
+-- Hide executor detection with safe fallbacks
+pcall(function()
+    if getgenv and getgenv().isexecutorclosure then
+        getgenv().isexecutorclosure = function() return false end
+    end
+end)
 
-if checkcaller then
-    local old = checkcaller
-    checkcaller = function() return true end -- Always claim we're Roblox
-end
+pcall(function()
+    if checkcaller then
+        local old = checkcaller
+        checkcaller = function() return true end
+    end
+end)
 
 print("✓ Executor fingerprint nuked")
 
 -- ═══════════════════════════════════════════════════════════
--- LEVEL 2: ANTI-CHEAT FUNCTION HOOKING
--- Neuter the game's detection methods
+-- LEVEL 2: ANTI-CHEAT FUNCTION HOOKING (SAFE VERSION)
 -- ═══════════════════════════════════════════════════════════
 
-pcall(function()
+local hookSuccess = pcall(function()
+    -- Check if we have the required functions
+    if not getrawmetatable then
+        warn("⚠️ getrawmetatable not available - skipping metatable hooks")
+        return
+    end
+    
     local mt = getrawmetatable(game)
+    if not mt then
+        warn("⚠️ Could not get metatable")
+        return
+    end
+    
     local oldIndex = mt.__index
     local oldNamecall = mt.__namecall
     
-    setreadonly(mt, false)
+    -- Check if setreadonly exists, use alternative if not
+    local function makeWritable(tbl)
+        if setreadonly then
+            return setreadonly(tbl, false)
+        elseif make_writeable then
+            return make_writeable(tbl)
+        else
+            -- Some executors don't need this
+            return true
+        end
+    end
     
-    -- Hook __namecall to add variance to EVERYTHING
-    mt.__namecall = newcclosure(function(self, ...)
-        local method = getnamecallmethod()
+    local function makeReadonly(tbl)
+        if setreadonly then
+            return setreadonly(tbl, true)
+        elseif make_readonly then
+            return make_readonly(tbl)
+        else
+            return true
+        end
+    end
+    
+    makeWritable(mt)
+    
+    -- Use newcclosure if available, otherwise raw function
+    local function safeWrap(func)
+        if newcclosure then
+            return newcclosure(func)
+        else
+            return func
+        end
+    end
+    
+    -- Hook __namecall
+    mt.__namecall = safeWrap(function(self, ...)
+        local method = getnamecallmethod and getnamecallmethod() or ""
         local args = {...}
         
-        -- Add micro-delays to remote calls (undetectable, just breaks patterns)
+        -- Add micro-delays to remote calls
         if method == "FireServer" or method == "InvokeServer" then
-            wait(math.random(1, 15) / 1000) -- 0.001-0.015s
+            task.wait(math.random(1, 15) / 1000)
         end
         
-        -- Block known anti-cheat remotes (BSS-specific)
+        -- Block anti-cheat remotes
         if method == "FireServer" and tostring(self):find("Anti") then
-            return -- Silently drop anti-cheat reports
+            return
         end
         
         return oldNamecall(self, ...)
     end)
     
-    -- Hook __index to hide suspicious properties
-    mt.__index = newcclosure(function(self, key)
-        -- If game tries to check for exploit properties, lie
+    -- Hook __index
+    mt.__index = safeWrap(function(self, key)
         if key == "DevComputerMovementMode" or key == "DevTouchMovementMode" then
             return Enum.DevComputerMovementMode.UserChoice
         end
@@ -89,114 +131,114 @@ pcall(function()
         return oldIndex(self, key)
     end)
     
-    setreadonly(mt, true)
+    makeReadonly(mt)
     print("✓ Anti-cheat hooks installed")
 end)
 
--- ═══════════════════════════════════════════════════════════
--- LEVEL 3: TELEMETRY BLOCKING
--- Stop game from reporting suspicious activity
--- ═══════════════════════════════════════════════════════════
-
--- Hook HttpService to block telemetry endpoints
-if HttpService then
-    local oldRequest = HttpService.RequestAsync
-    HttpService.RequestAsync = function(self, options)
-        -- Block known Roblox telemetry endpoints
-        if options.Url then
-            local url = options.Url:lower()
-            if url:find("telemetry") or url:find("analytics") or 
-               url:find("metrics") or url:find("report") then
-                return {StatusCode = 200, Body = "{}"}  -- Fake success
-            end
-        end
-        return oldRequest(self, options)
-    end
-    print("✓ Telemetry blocked")
+if not hookSuccess then
+    print("⚠️ Metatable hooks failed - continuing with other protections")
 end
 
 -- ═══════════════════════════════════════════════════════════
+-- LEVEL 3: TELEMETRY BLOCKING
+-- ═══════════════════════════════════════════════════════════
+
+pcall(function()
+    if HttpService then
+        local oldRequest = HttpService.RequestAsync
+        HttpService.RequestAsync = function(self, options)
+            if options.Url then
+                local url = options.Url:lower()
+                if url:find("telemetry") or url:find("analytics") or 
+                   url:find("metrics") or url:find("report") then
+                    return {StatusCode = 200, Body = "{}"}
+                end
+            end
+            return oldRequest(self, options)
+        end
+        print("✓ Telemetry blocked")
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════
 -- LEVEL 4: ADVANCED BEHAVIORAL AI
--- Each account acts like a different human
 -- ═══════════════════════════════════════════════════════════
 
 local userId = player.UserId
 math.randomseed(userId + tick())
 
 local profile = {
-    -- Movement personality
     walkSpeed = 14 + math.random() * 4,
     walkVariance = 0.15 + (math.random() * 0.15),
-    
-    -- Action timing (each account different)
     baseDelay = 0.3 + (math.random() * 0.7),
     delayVariance = 0.5 + (math.random() * 1.5),
-    
-    -- Behavioral patterns
-    idleFrequency = 120 + math.random(180), -- Idle every 2-5 min
-    wanderFrequency = 240 + math.random(240), -- Wander every 4-8 min
-    
-    -- Unique fingerprint
+    idleFrequency = 120 + math.random(180),
+    wanderFrequency = 240 + math.random(240),
     signature = string.format("%x", userId % 0xFFFFFF)
 }
 
 print("✓ Profile: " .. profile.signature)
 
--- Walk speed with realistic variance
-spawn(function()
-    while wait(2 + math.random() * 3) do
-        local char = player.Character
-        if char then
-            local hum = char:FindFirstChild("Humanoid")
-            if hum and hum.Health > 0 then
-                local variance = (math.random() - 0.5) * 2 * profile.walkVariance
-                hum.WalkSpeed = profile.walkSpeed + (profile.walkSpeed * variance)
+-- Walk speed variance
+task.spawn(function()
+    while task.wait(2 + math.random() * 3) do
+        pcall(function()
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChild("Humanoid")
+                if hum and hum.Health > 0 then
+                    local variance = (math.random() - 0.5) * 2 * profile.walkVariance
+                    hum.WalkSpeed = profile.walkSpeed + (profile.walkSpeed * variance)
+                end
             end
-        end
+        end)
     end
 end)
 
--- Camera movement (not frozen like bot)
-spawn(function()
-    while wait(20 + math.random() * 40) do
-        local cam = workspace.CurrentCamera
-        if cam and cam.CameraType == Enum.CameraType.Custom then
-            -- Realistic camera drift
-            local drift = (math.random() - 0.5) * 0.08
-            cam.CFrame = cam.CFrame * CFrame.Angles(
-                math.rad(drift),
-                math.rad(drift * 1.2),
-                0
-            )
-        end
+-- Camera movement
+task.spawn(function()
+    while task.wait(20 + math.random() * 40) do
+        pcall(function()
+            local cam = workspace.CurrentCamera
+            if cam and cam.CameraType == Enum.CameraType.Custom then
+                local drift = (math.random() - 0.5) * 0.08
+                cam.CFrame = cam.CFrame * CFrame.Angles(
+                    math.rad(drift),
+                    math.rad(drift * 1.2),
+                    0
+                )
+            end
+        end)
     end
 end)
 
--- Random idle periods (like tabbing out)
-spawn(function()
-    while wait(profile.idleFrequency + math.random() * 60) do
-        wait(8 + math.random() * 22) -- Idle 8-30s
+-- Random idle periods
+task.spawn(function()
+    while task.wait(profile.idleFrequency + math.random() * 60) do
+        task.wait(8 + math.random() * 22)
     end
 end)
 
 -- Random wandering
-spawn(function()
-    while wait(profile.wanderFrequency + math.random() * 120) do
-        local char = player.Character
-        if char then
-            local hum = char:FindFirstChild("Humanoid")
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if hum and hrp then
-                local offset = Vector3.new(
-                    math.random(-60, 60),
-                    0,
-                    math.random(-60, 60)
-                )
-                hum:MoveTo(hrp.Position + offset)
-                wait(4 + math.random() * 5)
-                hum:MoveTo(hrp.Position)
+task.spawn(function()
+    while task.wait(profile.wanderFrequency + math.random() * 120) do
+        pcall(function()
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChild("Humanoid")
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if hum and hrp then
+                    local offset = Vector3.new(
+                        math.random(-60, 60),
+                        0,
+                        math.random(-60, 60)
+                    )
+                    hum:MoveTo(hrp.Position + offset)
+                    task.wait(4 + math.random() * 5)
+                    hum:MoveTo(hrp.Position)
+                end
             end
-        end
+        end)
     end
 end)
 
@@ -204,14 +246,13 @@ print("✓ Behavioral AI active")
 
 -- ═══════════════════════════════════════════════════════════
 -- LEVEL 5: HEARTBEAT RANDOMIZATION
--- Break perfect loop timing
 -- ═══════════════════════════════════════════════════════════
 
 local lastStutter = tick()
 RunService.Heartbeat:Connect(function()
     local now = tick()
     if now - lastStutter > (6 + math.random() * 6) and math.random() > 0.5 then
-        wait(math.random(3, 25) / 1000) -- 0.003-0.025s stutter
+        task.wait(math.random(3, 25) / 1000)
         lastStutter = now
     end
 end)
@@ -220,50 +261,52 @@ print("✓ Heartbeat randomized")
 
 -- ═══════════════════════════════════════════════════════════
 -- LEVEL 6: NETWORK FINGERPRINT RANDOMIZATION
--- Make each account look different at network level
 -- ═══════════════════════════════════════════════════════════
 
--- This doesn't delay webhooks, just adds fingerprint variance
-if request or http_request then
-    local oldReq = request or http_request
+pcall(function()
+    local requestFunc = request or http_request or syn and syn.request
     
-    local function fakeFingerprint(options)
-        options.Headers = options.Headers or {}
+    if requestFunc then
+        local oldReq = requestFunc
         
-        -- Randomize user agent per account
-        local agents = {
-            "Roblox/WinInet",
-            "Roblox/WinHttp",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "Mozilla/5.0 (Windows NT 10.0; WOW64)",
-            "RobloxStudio/WinHttp"
-        }
-        options.Headers["User-Agent"] = agents[(userId % #agents) + 1]
+        local function fakeFingerprint(options)
+            options.Headers = options.Headers or {}
+            
+            local agents = {
+                "Roblox/WinInet",
+                "Roblox/WinHttp",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "Mozilla/5.0 (Windows NT 10.0; WOW64)",
+                "RobloxStudio/WinHttp"
+            }
+            options.Headers["User-Agent"] = agents[(userId % #agents) + 1]
+            options.Headers["X-Session-ID"] = profile.signature
+            options.Headers["X-Client-Time"] = tostring(tick())
+            
+            return oldReq(options)
+        end
         
-        -- Add "realistic" client fingerprints
-        options.Headers["X-Session-ID"] = profile.signature
-        options.Headers["X-Client-Time"] = tostring(tick())
+        -- Override in global scope
+        if request then request = fakeFingerprint end
+        if http_request then http_request = fakeFingerprint end
+        if syn and syn.request then syn.request = fakeFingerprint end
         
-        return oldReq(options)
+        print("✓ Network fingerprint randomized")
     end
-    
-    request = fakeFingerprint
-    http_request = fakeFingerprint
-    print("✓ Network fingerprint randomized")
-end
+end)
 
 -- ═══════════════════════════════════════════════════════════
 -- READY
 -- ═══════════════════════════════════════════════════════════
 
-wait(1)
+task.wait(1)
 
 print("")
 print("════════════════════════════════════════")
 print("🛡️ NUCLEAR PROTECTION ACTIVE")
 print("════════════════════════════════════════")
 print("✓ Executor hidden")
-print("✓ Anti-cheat neutered")
+print("✓ Anti-cheat " .. (hookSuccess and "neutered" or "bypassed (partial)"))
 print("✓ Telemetry blocked")
 print("✓ Behavioral AI running")
 print("✓ Heartbeat randomized")
