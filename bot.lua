@@ -1,6 +1,6 @@
 -- ═══════════════════════════════════════════════════════════
--- ADVANCED BOT PROTECTION v7.3 - BEE SWARM COMPATIBLE
--- Fixed for games with restricted HttpService
+-- ADVANCED BOT PROTECTION v7.4 - DELAYED HOOK INSTALLATION
+-- Waits for game to fully load before hooking to prevent crashes
 -- ═══════════════════════════════════════════════════════════
 
 local gameJobId = game.JobId
@@ -15,6 +15,12 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
+
+-- Wait for player to fully load (prevents nil errors during teleport)
+if not player then
+    repeat task.wait(0.1) until Players.LocalPlayer
+    player = Players.LocalPlayer
+end
 
 -- ═══════════════════════════════════════════════════════════
 -- LEVEL 1: EXECUTOR FINGERPRINT ANNIHILATION
@@ -50,78 +56,73 @@ end)
 print("✓ Executor fingerprint nuked")
 
 -- ═══════════════════════════════════════════════════════════
--- LEVEL 2: REMOTE HOOKING (BSS-SAFE)
+-- LEVEL 2: DELAYED REMOTE HOOKING
+-- Wait 3 seconds before installing hooks (let other scripts load)
 -- ═══════════════════════════════════════════════════════════
 
-print("⚙️ Installing remote hooks...")
+print("⏳ Remote hooks will install in 3 seconds...")
 
-local hookedCount = 0
-
-local function hookRemote(remote)
-    if not remote then return end
-    if not (remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction")) then return end
+task.delay(3, function()
+    local hookedCount = 0
     
-    local success = pcall(function()
-        -- Check for FireServer
-        if remote.FireServer then
-            local oldFire = remote.FireServer
-            
-            remote.FireServer = function(self, ...)
-                -- Micro-delay for pattern breaking
-                task.wait(math.random(1, 15) / 1000)
-                
-                -- Block anti-cheat remotes
-                local remoteName = tostring(self):lower()
-                if remoteName:find("anti") or remoteName:find("detect") or remoteName:find("check") then
-                    return -- Silently drop
-                end
-                
-                return oldFire(self, ...)
-            end
-            
-            hookedCount = hookedCount + 1
-        end
+    local function hookRemote(remote)
+        if not remote then return end
+        if not (remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction")) then return end
         
-        -- Check for InvokeServer
-        if remote.InvokeServer then
-            local oldInvoke = remote.InvokeServer
-            
-            remote.InvokeServer = function(self, ...)
-                task.wait(math.random(1, 15) / 1000)
+        pcall(function()
+            if remote.FireServer then
+                local oldFire = remote.FireServer
                 
-                local remoteName = tostring(self):lower()
-                if remoteName:find("anti") or remoteName:find("detect") or remoteName:find("check") then
-                    return
+                remote.FireServer = function(self, ...)
+                    task.wait(math.random(1, 15) / 1000)
+                    
+                    local remoteName = tostring(self):lower()
+                    if remoteName:find("anti") or remoteName:find("detect") or remoteName:find("check") then
+                        return
+                    end
+                    
+                    return oldFire(self, ...)
                 end
                 
-                return oldInvoke(self, ...)
+                hookedCount = hookedCount + 1
             end
-        end
+            
+            if remote.InvokeServer then
+                local oldInvoke = remote.InvokeServer
+                
+                remote.InvokeServer = function(self, ...)
+                    task.wait(math.random(1, 15) / 1000)
+                    
+                    local remoteName = tostring(self):lower()
+                    if remoteName:find("anti") or remoteName:find("detect") or remoteName:find("check") then
+                        return
+                    end
+                    
+                    return oldInvoke(self, ...)
+                end
+            end
+        end)
+    end
+    
+    for _, obj in ipairs(game:GetDescendants()) do
+        hookRemote(obj)
+    end
+    
+    game.DescendantAdded:Connect(function(obj)
+        task.wait(0.05)
+        hookRemote(obj)
     end)
-end
-
--- Hook all existing remotes
-for _, obj in ipairs(game:GetDescendants()) do
-    hookRemote(obj)
-end
-
--- Hook future remotes
-game.DescendantAdded:Connect(function(obj)
-    task.wait(0.05)
-    hookRemote(obj)
+    
+    print("✓ Hooked " .. hookedCount .. " remotes")
 end)
 
-print("✓ Hooked " .. hookedCount .. " remotes")
-
 -- ═══════════════════════════════════════════════════════════
--- LEVEL 3: TELEMETRY BLOCKING (BSS-SAFE)
--- Only hook if RequestAsync actually exists
+-- LEVEL 3: TELEMETRY BLOCKING (PASSIVE - NO DELAYS)
 -- ═══════════════════════════════════════════════════════════
 
 local telemetryHooked = false
 
 pcall(function()
-    -- Check if RequestAsync exists before trying to hook it
     if HttpService and HttpService.RequestAsync then
         local oldRequest = HttpService.RequestAsync
         
@@ -144,7 +145,7 @@ end)
 if telemetryHooked then
     print("✓ Telemetry blocked")
 else
-    print("⚠️ Telemetry hook skipped (RequestAsync disabled)")
+    print("⚠️ Telemetry hook skipped")
 end
 
 -- ═══════════════════════════════════════════════════════════
@@ -164,7 +165,6 @@ local profile = {
 
 print("✓ Profile: " .. profile.signature)
 
--- Walk speed randomization
 task.spawn(function()
     while true do
         pcall(function()
@@ -183,7 +183,6 @@ end)
 
 print("✓ Walk randomizer active")
 
--- Camera drift
 task.spawn(function()
     while true do
         pcall(function()
@@ -203,7 +202,6 @@ end)
 
 print("✓ Camera drift enabled")
 
--- Idle periods
 task.spawn(function()
     while true do
         task.wait(profile.idleFrequency + math.random() * 60)
@@ -213,7 +211,6 @@ end)
 
 print("✓ Idle behavior running")
 
--- Random wandering
 task.spawn(function()
     while true do
         task.wait(profile.wanderFrequency + math.random() * 120)
@@ -256,7 +253,8 @@ end)
 print("✓ Heartbeat randomized")
 
 -- ═══════════════════════════════════════════════════════════
--- LEVEL 6: NETWORK FINGERPRINT (XENO REQUEST HOOK)
+-- LEVEL 6: SELECTIVE NETWORK FINGERPRINT
+-- Only spoof non-critical requests, leave game API alone
 -- ═══════════════════════════════════════════════════════════
 
 local networkHooked = false
@@ -275,8 +273,21 @@ pcall(function()
         
         request = function(options)
             options = options or {}
-            options.Headers = options.Headers or {}
             
+            -- Whitelist critical game API endpoints
+            local url = options.Url or ""
+            local isCritical = url:find("roblox.com/v1/games") or 
+                              url:find("roblox.com/v2/games") or
+                              url:find("assetdelivery.roblox.com") or
+                              url:find("discord.com/api/webhooks") -- Don't break webhooks
+            
+            -- Pass through critical requests untouched
+            if isCritical then
+                return oldReq(options)
+            end
+            
+            -- Spoof everything else
+            options.Headers = options.Headers or {}
             options.Headers["User-Agent"] = agents[(userId % #agents) + 1]
             options.Headers["X-Session-ID"] = profile.signature
             options.Headers["X-Client-Time"] = tostring(tick())
@@ -289,7 +300,7 @@ pcall(function()
 end)
 
 if networkHooked then
-    print("✓ Network fingerprint faked")
+    print("✓ Network fingerprint faked (critical APIs whitelisted)")
 else
     print("⚠️ Network hook skipped")
 end
@@ -305,11 +316,11 @@ print("════════════════════════�
 print("🛡️ NUCLEAR PROTECTION ONLINE")
 print("════════════════════════════════════════")
 print("✓ Executor hidden")
-print("✓ " .. hookedCount .. " remotes hooked")
+print("⏳ Remotes hooking in 3s (delayed start)")
 print(telemetryHooked and "✓ Telemetry blocked" or "⚠️ Telemetry N/A")
 print("✓ 4 AI behaviors active")
 print("✓ Heartbeat randomized")
-print(networkHooked and "✓ Network spoofed" or "⚠️ Network N/A")
+print(networkHooked and "✓ Network spoofed (critical whitelisted)" or "⚠️ Network N/A")
 print("")
 print("🎯 BEE SWARM SIMULATOR MODE")
 print("⚡ ALL SYSTEMS GO")
