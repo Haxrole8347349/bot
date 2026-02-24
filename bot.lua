@@ -1,51 +1,36 @@
--- ═══════════════════════════════════════════════════════════
--- STANDALONE BEHAVIORAL PROTECTION v4.0
--- Run this BEFORE your Vic Bee script
--- Makes you look human without touching Vic Bee code
--- ═══════════════════════════════════════════════════════════
+-- STANDALONE PROTECTION v4.0 - CLEAN VERSION
+-- Run this FIRST, then Vic Bee after
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 
-print("🛡️ Standalone Protection Loading...")
-print("⚠️ Make sure to inject Vic Bee AFTER this script!")
+print("Protection loading...")
 
--- ═══════════════════════════════════════════════════════════
--- GENERATE UNIQUE BEHAVIORAL PROFILE
--- ═══════════════════════════════════════════════════════════
-
-local function generateProfile()
+-- Generate unique profile per account
+local function makeProfile()
     local userId = player.UserId
     math.randomseed(userId + tick())
     
+    -- Fallback ID generation (some executors don't have GenerateGUID)
+    local id = ""
+    for i = 1, 8 do
+        id = id .. string.char(97 + math.random(0, 25))
+    end
+    
     return {
-        -- Timing patterns (each account different)
-        reactionMin = 0.4 + (math.random() * 0.6),      -- 0.4-1.0s
-        reactionMax = 1.5 + (math.random() * 2.0),      -- 1.5-3.5s
-        
-        -- Movement personality  
-        walkSpeed = 14 + (math.random() * 4),           -- 14-18
-        walkVariance = 0.1 + (math.random() * 0.15),    -- ±10-25%
-        
-        -- Activity rates
-        idleChance = 0.12 + (math.random() * 0.20),     -- 12-32%
-        wanderChance = 0.08 + (math.random() * 0.15),   -- 8-23%
-        
-        -- Network timing
-        webhookDelayMin = 2.5 + (math.random() * 2.5),  -- 2.5-5s
-        webhookDelayMax = 6 + (math.random() * 8),      -- 6-14s
-        requestJitter = 1200 + math.random(2800),       -- 1.2-4s
-        
-        -- Session patterns
-        breakEvery = (40 + math.random() * 35) * 60,    -- 40-75 min
-        breakLength = (4 + math.random() * 8) * 60,     // 4-12 min
-        
-        -- Unique ID
-        id = HttpService:GenerateGUID(false):sub(1, 8),
-        
-        -- State
+        reactionMin = 0.4 + (math.random() * 0.6),
+        reactionMax = 1.5 + (math.random() * 2.0),
+        walkSpeed = 14 + (math.random() * 4),
+        walkVariance = 0.1 + (math.random() * 0.15),
+        idleChance = 0.12 + (math.random() * 0.20),
+        wanderChance = 0.08 + (math.random() * 0.15),
+        webhookDelayMin = 2.5 + (math.random() * 2.5),
+        webhookDelayMax = 6 + (math.random() * 8),
+        requestJitter = 1200 + math.random(2800),
+        breakEvery = (40 + math.random() * 35) * 60,
+        breakLength = (4 + math.random() * 8) * 60,
+        id = id,
         lastIdle = 0,
         lastWander = 0,
         sessionStart = tick(),
@@ -54,54 +39,35 @@ local function generateProfile()
     }
 end
 
-local PROFILE = generateProfile()
+local PROFILE = makeProfile()
+print("Profile created: " .. PROFILE.id)
 
-print(string.format("🎭 Profile: %s | React: %.1f-%.1fs | Walk: %.1f", 
-    PROFILE.id, PROFILE.reactionMin, PROFILE.reactionMax, PROFILE.walkSpeed))
+-- Override request functions BEFORE Vic Bee loads
+local originalRequest = request or http_request or (syn and syn.request)
 
--- ═══════════════════════════════════════════════════════════
--- OVERRIDE REQUEST FUNCTIONS (BEFORE VIC BEE LOADS)
--- ═══════════════════════════════════════════════════════════
-
-local _originalRequest = request or http_request or syn.request
-
-local function ProtectedRequest(options)
-    -- Realistic delay (humans don't send webhooks instantly)
-    local delay = PROFILE.webhookDelayMin + (math.random() * (PROFILE.webhookDelayMax - PROFILE.webhookDelayMin))
-    task.wait(delay)
+if not originalRequest then
+    warn("No request function found - webhook protection disabled")
+else
+    local function protectedRequest(options)
+        local delay = PROFILE.webhookDelayMin + (math.random() * (PROFILE.webhookDelayMax - PROFILE.webhookDelayMin))
+        task.wait(delay)
+        task.wait(PROFILE.requestJitter / 1000)
+        
+        options.Headers = options.Headers or {}
+        options.Headers["X-Client-ID"] = PROFILE.id
+        options.Headers["X-Session"] = tostring(math.floor(tick() - PROFILE.sessionStart))
+        
+        return originalRequest(options)
+    end
     
-    -- Network jitter
-    task.wait(PROFILE.requestJitter / 1000)
+    request = protectedRequest
+    http_request = protectedRequest
+    if syn and syn.request then syn.request = protectedRequest end
     
-    -- Add fingerprint headers
-    options.Headers = options.Headers or {}
-    options.Headers["X-Client-ID"] = PROFILE.id
-    options.Headers["X-Session"] = tostring(math.floor(tick() - PROFILE.sessionStart))
-    options.Headers["X-Timestamp"] = tostring(tick())
-    
-    -- Randomize user agent
-    local agents = {
-        "Roblox/WinInet",
-        "Roblox/WinHttp",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "RobloxStudio/WinHttp"
-    }
-    options.Headers["User-Agent"] = agents[math.random(1, #agents)]
-    
-    return _originalRequest(options)
+    print("Request protection enabled")
 end
 
--- Override ALL request functions globally
-request = ProtectedRequest
-http_request = ProtectedRequest
-if syn and syn.request then syn.request = ProtectedRequest end
-
-print("✅ Request functions overridden with protection")
-
--- ═══════════════════════════════════════════════════════════
--- REALISTIC WALK SPEED VARIATION
--- ═══════════════════════════════════════════════════════════
-
+-- Walk speed variation
 task.spawn(function()
     while task.wait(3 + math.random() * 4) do
         if PROFILE.onBreak then continue end
@@ -110,7 +76,6 @@ task.spawn(function()
         if char then
             local humanoid = char:FindFirstChild("Humanoid")
             if humanoid and humanoid.Health > 0 then
-                -- Fluctuate speed (keyboard input variance)
                 local variance = (math.random() - 0.5) * 2 * PROFILE.walkVariance
                 local speed = PROFILE.walkSpeed + (PROFILE.walkSpeed * variance)
                 humanoid.WalkSpeed = speed
@@ -119,19 +84,15 @@ task.spawn(function()
     end
 end)
 
--- ═══════════════════════════════════════════════════════════
--- HUMAN-LIKE BEHAVIORS (BACKGROUND LOOP)
--- ═══════════════════════════════════════════════════════════
-
-local function idleBehavior()
+-- Idle behavior
+local function doIdle()
     if tick() - PROFILE.lastIdle < 90 then return end
     PROFILE.lastIdle = tick()
-    
-    print("🧍 Idling for " .. math.floor(8 + math.random() * 18) .. "s")
-    task.wait(8 + math.random() * 18)  -- Stand still 8-26s
+    task.wait(8 + math.random() * 18)
 end
 
-local function wanderBehavior()
+-- Wander behavior
+local function doWander()
     if tick() - PROFILE.lastWander < 150 then return end
     PROFILE.lastWander = tick()
     
@@ -142,9 +103,6 @@ local function wanderBehavior()
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not humanoid or not hrp then return end
     
-    print("🚶 Wandering randomly")
-    
-    -- Random nearby point
     local offset = Vector3.new(
         (math.random() - 0.5) * 80,
         0,
@@ -153,58 +111,43 @@ local function wanderBehavior()
     
     humanoid:MoveTo(hrp.Position + offset)
     
-    -- Stop after a bit
     task.delay(4 + math.random() * 6, function()
-        if humanoid then
-            humanoid:MoveTo(hrp.Position)
-        end
+        if humanoid then humanoid:MoveTo(hrp.Position) end
     end)
 end
 
--- Background behavior loop
+-- Random behavior loop
 task.spawn(function()
-    while task.wait(25 + math.random() * 50) do  -- Every 25-75s
+    while task.wait(25 + math.random() * 50) do
         if PROFILE.onBreak then continue end
         
         local roll = math.random()
-        
         if roll < PROFILE.idleChance then
-            task.spawn(idleBehavior)
+            task.spawn(doIdle)
         elseif roll < PROFILE.idleChance + PROFILE.wanderChance then
-            task.spawn(wanderBehavior)
+            task.spawn(doWander)
         end
     end
 end)
 
--- ═══════════════════════════════════════════════════════════
--- SESSION BREAK SYSTEM
--- ═══════════════════════════════════════════════════════════
-
+-- Break system
 task.spawn(function()
     while true do
-        task.wait(60)  -- Check every minute
-        
+        task.wait(60)
         local timeSinceBreak = tick() - PROFILE.lastBreak
         
         if not PROFILE.onBreak and timeSinceBreak > PROFILE.breakEvery then
             PROFILE.onBreak = true
             PROFILE.lastBreak = tick()
-            
-            local mins = math.floor(PROFILE.breakLength / 60)
-            print(string.format("☕ BREAK TIME - %d minutes", mins))
-            
+            print("Taking break for " .. math.floor(PROFILE.breakLength / 60) .. " minutes")
             task.wait(PROFILE.breakLength)
-            
             PROFILE.onBreak = false
-            print("✅ Break over")
+            print("Break over")
         end
     end
 end)
 
--- ═══════════════════════════════════════════════════════════
--- SUBTLE CAMERA DRIFT
--- ═══════════════════════════════════════════════════════════
-
+-- Camera drift
 task.spawn(function()
     while task.wait(35 + math.random() * 55) do
         if PROFILE.onBreak then continue end
@@ -221,22 +164,9 @@ task.spawn(function()
     end
 end)
 
--- ═══════════════════════════════════════════════════════════
--- READY
--- ═══════════════════════════════════════════════════════════
+task.wait(2)
 
-task.wait(2)  -- Give everything time to initialize
-
-print("")
-print("════════════════════════════════════════")
-print("✅ PROTECTION ACTIVE")
-print("════════════════════════════════════════")
-print("✓ Request protection: ENABLED")
-print("✓ Walk speed variance: ENABLED")
-print("✓ Random idle/wander: ENABLED")
-print("✓ Session breaks: ENABLED")
-print("✓ Camera drift: ENABLED")
-print("")
-print("🎯 NOW INJECT YOUR VIC BEE SCRIPT")
-print("════════════════════════════════════════")
-print("")
+print("================================")
+print("PROTECTION ACTIVE")
+print("Now inject Vic Bee script")
+print("================================")
