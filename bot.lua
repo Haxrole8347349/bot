@@ -1,6 +1,6 @@
 -- ═══════════════════════════════════════════════════════════
--- ADVANCED BOT PROTECTION v7.2 - XENO COMPATIBLE
--- Fixed for Xeno executor's specific limitations
+-- ADVANCED BOT PROTECTION v7.3 - BEE SWARM COMPATIBLE
+-- Fixed for games with restricted HttpService
 -- ═══════════════════════════════════════════════════════════
 
 local gameJobId = game.JobId
@@ -50,94 +50,105 @@ end)
 print("✓ Executor fingerprint nuked")
 
 -- ═══════════════════════════════════════════════════════════
--- LEVEL 2: XENO-SAFE REMOTE HOOKING
--- Skip metatable, hook remotes directly instead
+-- LEVEL 2: REMOTE HOOKING (BSS-SAFE)
 -- ═══════════════════════════════════════════════════════════
 
-print("⚙️ Installing remote hooks (Xeno-safe method)...")
+print("⚙️ Installing remote hooks...")
 
-local hookedRemotes = 0
+local hookedCount = 0
 
--- Hook all RemoteEvents in the game
 local function hookRemote(remote)
-    if not remote:IsA("RemoteEvent") and not remote:IsA("RemoteFunction") then return end
+    if not remote then return end
+    if not (remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction")) then return end
     
-    pcall(function()
-        local oldFireServer = remote.FireServer
-        local oldInvokeServer = remote.InvokeServer
-        
-        -- Hook FireServer
-        if oldFireServer then
+    local success = pcall(function()
+        -- Check for FireServer
+        if remote.FireServer then
+            local oldFire = remote.FireServer
+            
             remote.FireServer = function(self, ...)
-                -- Add micro-delay
+                -- Micro-delay for pattern breaking
                 task.wait(math.random(1, 15) / 1000)
                 
-                -- Block anti-cheat
-                if tostring(self):lower():find("anti") or tostring(self):lower():find("detect") then
-                    return
+                -- Block anti-cheat remotes
+                local remoteName = tostring(self):lower()
+                if remoteName:find("anti") or remoteName:find("detect") or remoteName:find("check") then
+                    return -- Silently drop
                 end
                 
-                return oldFireServer(self, ...)
+                return oldFire(self, ...)
             end
-            hookedRemotes = hookedRemotes + 1
+            
+            hookedCount = hookedCount + 1
         end
         
-        -- Hook InvokeServer
-        if oldInvokeServer then
+        -- Check for InvokeServer
+        if remote.InvokeServer then
+            local oldInvoke = remote.InvokeServer
+            
             remote.InvokeServer = function(self, ...)
                 task.wait(math.random(1, 15) / 1000)
                 
-                if tostring(self):lower():find("anti") or tostring(self):lower():find("detect") then
+                local remoteName = tostring(self):lower()
+                if remoteName:find("anti") or remoteName:find("detect") or remoteName:find("check") then
                     return
                 end
                 
-                return oldInvokeServer(self, ...)
+                return oldInvoke(self, ...)
             end
         end
     end)
 end
 
--- Hook existing remotes
-for _, descendant in ipairs(game:GetDescendants()) do
-    hookRemote(descendant)
+-- Hook all existing remotes
+for _, obj in ipairs(game:GetDescendants()) do
+    hookRemote(obj)
 end
 
 -- Hook future remotes
-game.DescendantAdded:Connect(function(descendant)
-    task.wait(0.1)
-    hookRemote(descendant)
+game.DescendantAdded:Connect(function(obj)
+    task.wait(0.05)
+    hookRemote(obj)
 end)
 
-print("✓ Hooked " .. hookedRemotes .. " remotes (anti-cheat neutered)")
+print("✓ Hooked " .. hookedCount .. " remotes")
 
 -- ═══════════════════════════════════════════════════════════
--- LEVEL 3: TELEMETRY BLOCKING
+-- LEVEL 3: TELEMETRY BLOCKING (BSS-SAFE)
+-- Only hook if RequestAsync actually exists
 -- ═══════════════════════════════════════════════════════════
 
-local telemetryBlocked = false
+local telemetryHooked = false
 
 pcall(function()
-    if HttpService then
+    -- Check if RequestAsync exists before trying to hook it
+    if HttpService and HttpService.RequestAsync then
         local oldRequest = HttpService.RequestAsync
+        
         HttpService.RequestAsync = function(self, options)
             if options and options.Url then
                 local url = options.Url:lower()
                 if url:find("telemetry") or url:find("analytics") or 
                    url:find("metrics") or url:find("report") or
                    url:find("logging") then
-                    telemetryBlocked = true
                     return {StatusCode = 200, Body = "{}"}
                 end
             end
             return oldRequest(self, options)
         end
+        
+        telemetryHooked = true
     end
 end)
 
-print("✓ Telemetry blocker installed")
+if telemetryHooked then
+    print("✓ Telemetry blocked")
+else
+    print("⚠️ Telemetry hook skipped (RequestAsync disabled)")
+end
 
 -- ═══════════════════════════════════════════════════════════
--- LEVEL 4: ADVANCED BEHAVIORAL AI
+-- LEVEL 4: BEHAVIORAL AI
 -- ═══════════════════════════════════════════════════════════
 
 local userId = player.UserId
@@ -146,19 +157,17 @@ math.randomseed(userId + tick())
 local profile = {
     walkSpeed = 14 + math.random() * 4,
     walkVariance = 0.15 + (math.random() * 0.15),
-    baseDelay = 0.3 + (math.random() * 0.7),
-    delayVariance = 0.5 + (math.random() * 1.5),
     idleFrequency = 120 + math.random(180),
     wanderFrequency = 240 + math.random(240),
     signature = string.format("%x", userId % 0xFFFFFF)
 }
 
-print("✓ Profile generated: " .. profile.signature)
+print("✓ Profile: " .. profile.signature)
 
--- Walk speed variance
+-- Walk speed randomization
 task.spawn(function()
     while true do
-        local success = pcall(function()
+        pcall(function()
             local char = player.Character
             if char then
                 local hum = char:FindFirstChild("Humanoid")
@@ -172,7 +181,7 @@ task.spawn(function()
     end
 end)
 
-print("✓ Walk speed randomizer started")
+print("✓ Walk randomizer active")
 
 -- Camera drift
 task.spawn(function()
@@ -194,7 +203,7 @@ end)
 
 print("✓ Camera drift enabled")
 
--- Random idle periods
+-- Idle periods
 task.spawn(function()
     while true do
         task.wait(profile.idleFrequency + math.random() * 60)
@@ -202,7 +211,7 @@ task.spawn(function()
     end
 end)
 
-print("✓ Idle behavior active")
+print("✓ Idle behavior running")
 
 -- Random wandering
 task.spawn(function()
@@ -213,7 +222,7 @@ task.spawn(function()
             if char then
                 local hum = char:FindFirstChild("Humanoid")
                 local hrp = char:FindFirstChild("HumanoidRootPart")
-                if hum and hrp then
+                if hum and hrp and hum.Health > 0 then
                     local offset = Vector3.new(
                         math.random(-60, 60),
                         0,
@@ -228,34 +237,31 @@ task.spawn(function()
     end
 end)
 
-print("✓ Wander AI running")
+print("✓ Wander AI active")
 
 -- ═══════════════════════════════════════════════════════════
 -- LEVEL 5: HEARTBEAT RANDOMIZATION
 -- ═══════════════════════════════════════════════════════════
 
 local lastStutter = tick()
-local stutterCount = 0
 
 RunService.Heartbeat:Connect(function()
     local now = tick()
     if now - lastStutter > (6 + math.random() * 6) and math.random() > 0.5 then
         task.wait(math.random(3, 25) / 1000)
         lastStutter = now
-        stutterCount = stutterCount + 1
     end
 end)
 
-print("✓ Heartbeat randomizer active")
+print("✓ Heartbeat randomized")
 
 -- ═══════════════════════════════════════════════════════════
--- LEVEL 6: NETWORK FINGERPRINT RANDOMIZATION
+-- LEVEL 6: NETWORK FINGERPRINT (XENO REQUEST HOOK)
 -- ═══════════════════════════════════════════════════════════
 
 local networkHooked = false
 
 pcall(function()
-    -- Xeno uses 'request' primarily
     if request then
         local oldReq = request
         
@@ -283,9 +289,9 @@ pcall(function()
 end)
 
 if networkHooked then
-    print("✓ Network fingerprint randomized")
+    print("✓ Network fingerprint faked")
 else
-    print("⚠️ Network hook skipped (not critical)")
+    print("⚠️ Network hook skipped")
 end
 
 -- ═══════════════════════════════════════════════════════════
@@ -296,16 +302,16 @@ task.wait(0.5)
 
 print("")
 print("════════════════════════════════════════")
-print("🛡️ NUCLEAR PROTECTION ACTIVE (XENO)")
+print("🛡️ NUCLEAR PROTECTION ONLINE")
 print("════════════════════════════════════════")
-print("✓ Executor fingerprint nuked")
-print("✓ " .. hookedRemotes .. " remotes hooked")
-print("✓ Telemetry blocked")
-print("✓ Behavioral AI running (4 systems)")
+print("✓ Executor hidden")
+print("✓ " .. hookedCount .. " remotes hooked")
+print(telemetryHooked and "✓ Telemetry blocked" or "⚠️ Telemetry N/A")
+print("✓ 4 AI behaviors active")
 print("✓ Heartbeat randomized")
-print(networkHooked and "✓ Network fingerprint faked" or "⚠️ Network hook optional")
+print(networkHooked and "✓ Network spoofed" or "⚠️ Network N/A")
 print("")
-print("⚡ XENO COMPATIBLE MODE")
-print("🎯 ALL SYSTEMS OPERATIONAL")
+print("🎯 BEE SWARM SIMULATOR MODE")
+print("⚡ ALL SYSTEMS GO")
 print("════════════════════════════════════════")
 print("")
